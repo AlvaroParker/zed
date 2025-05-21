@@ -8753,6 +8753,7 @@ dependencies = [
  "smol",
  "streaming-iterator",
  "strsim",
+ "strum 0.27.1",
  "sum_tree",
  "task",
  "text",
@@ -11895,6 +11896,23 @@ name = "precomputed-hash"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "925383efa346730478fb4838dbe9137d2a47675ad789c546d150a6e1dd4ab31c"
+
+[[package]]
+name = "prediction_provider_selector"
+version = "0.1.0"
+dependencies = [
+ "editor",
+ "fs",
+ "fuzzy",
+ "gpui",
+ "language",
+ "picker",
+ "settings",
+ "strum 0.27.1",
+ "ui",
+ "util",
+ "workspace",
+]
 
 [[package]]
 name = "prettier"
@@ -19794,6 +19812,7 @@ dependencies = [
  "parking_lot",
  "paths",
  "picker",
+ "prediction_provider_selector",
  "profiling",
  "project",
  "project_panel",

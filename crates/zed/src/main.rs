@@ -560,6 +560,7 @@ fn main() {
         terminal_view::init(cx);
         journal::init(app_state.clone(), cx);
         language_selector::init(cx);
+        prediction_provider_selector::init(cx);
         toolchain_selector::init(cx);
         theme_selector::init(cx);
         language_tools::init(cx);

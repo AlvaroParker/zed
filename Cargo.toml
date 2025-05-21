@@ -105,6 +105,7 @@ members = [
     "crates/panel",
     "crates/paths",
     "crates/picker",
+    "crates/prediction_provider_selector",
     "crates/prettier",
     "crates/project",
     "crates/project_panel",
@@ -314,6 +315,7 @@ paths = { path = "crates/paths" }
 picker = { path = "crates/picker" }
 plugin = { path = "crates/plugin" }
 plugin_macros = { path = "crates/plugin_macros" }
+prediction_provider_selector = { path = "crates/prediction_provider_selector" }
 prettier = { path = "crates/prettier" }
 project = { path = "crates/project" }
 project_panel = { path = "crates/project_panel" }

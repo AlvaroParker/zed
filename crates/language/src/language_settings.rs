@@ -23,7 +23,8 @@ use serde_json::Value;
 use settings::{
     Settings, SettingsLocation, SettingsSources, SettingsStore, add_references_to_properties,
 };
-use std::{borrow::Cow, num::NonZeroU32, path::Path, sync::Arc};
+use std::{borrow::Cow, num::NonZeroU32, path::Path, str::FromStr, sync::Arc};
+use strum::EnumIter;
 use util::serde::default_true;
 
 /// Initializes the language settings.
@@ -207,7 +208,9 @@ impl LanguageSettings {
 }
 
 /// The provider that supplies edit predictions.
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Copy, Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, JsonSchema, EnumIter,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum EditPredictionProvider {
     None,
@@ -215,6 +218,31 @@ pub enum EditPredictionProvider {
     Copilot,
     Supermaven,
     Zed,
+}
+
+impl ToString for EditPredictionProvider {
+    fn to_string(&self) -> String {
+        match self {
+            EditPredictionProvider::None => "none".to_string(),
+            EditPredictionProvider::Copilot => "copilot".to_string(),
+            EditPredictionProvider::Supermaven => "supermaven".to_string(),
+            EditPredictionProvider::Zed => "zed".to_string(),
+        }
+    }
+}
+
+impl FromStr for EditPredictionProvider {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "none" => Ok(EditPredictionProvider::None),
+            "copilot" => Ok(EditPredictionProvider::Copilot),
+            "supermaven" => Ok(EditPredictionProvider::Supermaven),
+            "zed" => Ok(EditPredictionProvider::Zed),
+            _ => Err(format!("Invalid edit prediction provider: {}", s)),
+        }
+    }
 }
 
 impl EditPredictionProvider {
