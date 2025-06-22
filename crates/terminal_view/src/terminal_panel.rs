@@ -22,7 +22,7 @@ use settings::Settings;
 use task::{RevealStrategy, RevealTarget, ShellBuilder, SpawnInTerminal, TaskId};
 use terminal::{
     Terminal,
-    terminal_settings::{TerminalDockPosition, TerminalSettings},
+    terminal_settings::{TabBarShow, TerminalDockPosition, TerminalSettings},
 };
 use ui::{
     ButtonCommon, Clickable, ContextMenu, FluentBuilder, PopoverMenu, Toggleable, Tooltip,
@@ -963,7 +963,15 @@ pub fn new_terminal_pane(
         pane.set_zoomed(zoomed, cx);
         pane.set_can_navigate(false, cx);
         pane.display_nav_history_buttons(None);
-        pane.set_should_display_tab_bar(|_, _| true);
+        pane.set_should_display_tab_bar(|pane, _, cx| {
+            let settings = TerminalSettings::get_global(cx);
+            match settings.tab_bar.show {
+                Some(TabBarShow::Always) => true,
+                Some(TabBarShow::Never) => false,
+                Some(TabBarShow::Auto) => pane.items_len() > 1,
+                None => true,
+            }
+        });
         pane.set_zoom_out_on_close(false);
 
         let split_closure_terminal_panel = terminal_panel.downgrade();

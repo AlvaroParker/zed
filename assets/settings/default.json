@@ -1348,6 +1348,20 @@
       // 5. Never show the scrollbar:
       //    "never"
       "show": null
+    },
+    // Tab bar related settings
+    "tab_bar": {
+      // When to show the terminal tab bar.
+      // This setting can take three values:
+      //
+      // 1. Show the tab bar if there's more than one terminal
+      //    tab open:
+      //    "auto"
+      // 2. Always show the tab bar (default):
+      //    "always"
+      // 3. Never show the tab bar:
+      //    "never"
+      "show": "always"
     }
     // Set the terminal's font size. If this option is not included,
     // the terminal will default to matching the buffer's font size.

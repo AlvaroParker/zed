@@ -48,6 +48,7 @@ pub struct TerminalSettings {
     pub max_scroll_history_lines: Option<usize>,
     pub toolbar: Toolbar,
     pub scrollbar: ScrollbarSettings,
+    pub tab_bar: TabBarSettings,
 }
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
@@ -56,6 +57,14 @@ pub struct ScrollbarSettings {
     ///
     /// Default: inherits editor scrollbar settings
     pub show: Option<ShowScrollbar>,
+}
+
+#[derive(Copy, Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct TabBarSettings {
+    /// When to show the tab bar in the terminal.
+    ///
+    /// Default: always
+    pub show: Option<TabBarShow>,
 }
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
@@ -80,6 +89,21 @@ pub enum ShowScrollbar {
     /// Always show the scrollbar.
     Always,
     /// Never show the scrollbar.
+    Never,
+}
+
+/// When to show the tab bar in the terminal.
+///
+/// Default: always
+#[derive(Copy, Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TabBarShow {
+    /// Show the tab bar if there's more than one
+    /// terminal tab open.
+    Auto,
+    /// Always show the tab bar.
+    Always,
+    /// Never show the tab bar.
     Never,
 }
 
@@ -223,6 +247,8 @@ pub struct TerminalSettingsContent {
     pub toolbar: Option<ToolbarContent>,
     /// Scrollbar-related settings
     pub scrollbar: Option<ScrollbarSettingsContent>,
+    /// Tab bar related settings
+    pub tab_bar: Option<TabBarSettings>,
 }
 
 impl settings::Settings for TerminalSettings {

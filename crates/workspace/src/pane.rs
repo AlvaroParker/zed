@@ -314,7 +314,7 @@ pub struct Pane {
     can_split_predicate:
         Option<Arc<dyn Fn(&mut Self, &dyn Any, &mut Window, &mut Context<Self>) -> bool>>,
     can_toggle_zoom: bool,
-    should_display_tab_bar: Rc<dyn Fn(&Window, &mut Context<Pane>) -> bool>,
+    should_display_tab_bar: Rc<dyn Fn(&Pane, &Window, &mut Context<Pane>) -> bool>,
     render_tab_bar_buttons: Rc<
         dyn Fn(
             &mut Pane,
@@ -463,7 +463,7 @@ impl Pane {
             custom_drop_handle: None,
             can_split_predicate: None,
             can_toggle_zoom: true,
-            should_display_tab_bar: Rc::new(|_, cx| TabBarSettings::get_global(cx).show),
+            should_display_tab_bar: Rc::new(|_, _, cx| TabBarSettings::get_global(cx).show),
             render_tab_bar_buttons: Rc::new(default_render_tab_bar_buttons),
             render_tab_bar: Rc::new(Self::render_tab_bar),
             show_tab_bar_buttons: TabBarSettings::get_global(cx).show_tab_bar_buttons,
@@ -657,7 +657,7 @@ impl Pane {
 
     pub fn set_should_display_tab_bar<F>(&mut self, should_display_tab_bar: F)
     where
-        F: 'static + Fn(&Window, &mut Context<Pane>) -> bool,
+        F: 'static + Fn(&Pane, &Window, &mut Context<Pane>) -> bool,
     {
         self.should_display_tab_bar = Rc::new(should_display_tab_bar);
     }
@@ -3370,7 +3370,7 @@ impl Render for Pane {
         }
 
         let should_display_tab_bar = self.should_display_tab_bar.clone();
-        let display_tab_bar = should_display_tab_bar(window, cx);
+        let display_tab_bar = should_display_tab_bar(&self, window, cx);
         let Some(project) = self.project.upgrade() else {
             return div().track_focus(&self.focus_handle(cx));
         };
