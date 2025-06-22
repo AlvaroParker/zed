@@ -33,8 +33,8 @@ use workspace::{
     ActivateNextPane, ActivatePane, ActivatePaneDown, ActivatePaneLeft, ActivatePaneRight,
     ActivatePaneUp, ActivatePreviousPane, DraggedSelection, DraggedTab, ItemId, MoveItemToPane,
     MoveItemToPaneInDirection, NewTerminal, Pane, PaneGroup, SplitDirection, SplitDown, SplitLeft,
-    SplitRight, SplitUp, SwapPaneDown, SwapPaneLeft, SwapPaneRight, SwapPaneUp, ToggleZoom,
-    Workspace,
+    SplitRight, SplitUp, SwapPaneDown, SwapPaneLeft, SwapPaneRight, SwapPaneUp,
+    TabBarSettings as WsTabBarSettings, ToggleZoom, Workspace,
     dock::{DockPosition, Panel, PanelEvent, PanelHandle},
     item::SerializableItem,
     move_active_item, move_item, pane,
@@ -969,6 +969,7 @@ pub fn new_terminal_pane(
                 Some(TabBarShow::Always) => true,
                 Some(TabBarShow::Never) => false,
                 Some(TabBarShow::Auto) => pane.items_len() > 1,
+                Some(TabBarShow::Global) => WsTabBarSettings::get_global(cx).show,
                 None => true,
             }
         });

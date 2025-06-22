@@ -105,6 +105,8 @@ pub enum TabBarShow {
     Always,
     /// Never show the tab bar.
     Never,
+    /// Follow the global setting for the tab bar.
+    Global,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]

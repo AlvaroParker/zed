@@ -1352,7 +1352,7 @@
     // Tab bar related settings
     "tab_bar": {
       // When to show the terminal tab bar.
-      // This setting can take three values:
+      // This setting can take four values:
       //
       // 1. Show the tab bar if there's more than one terminal
       //    tab open:
@@ -1361,6 +1361,8 @@
       //    "always"
       // 3. Never show the tab bar:
       //    "never"
+      // 4. Follow the global editor setting:
+      //   "global"
       "show": "always"
     }
     // Set the terminal's font size. If this option is not included,
