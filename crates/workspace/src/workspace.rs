@@ -6192,7 +6192,12 @@ impl Render for Workspace {
                 .items_start()
                 .text_color(colors.text)
                 .overflow_hidden()
-                .children(self.titlebar_item.clone())
+                .when(
+                    !self.zoomed.is_some(),
+                    |this| {
+                        this.children(self.titlebar_item.clone())
+                    },
+                )
                 .on_modifiers_changed(move |_, _, cx| {
                     for &id in &notification_entities {
                         cx.notify(id);
@@ -6544,14 +6549,36 @@ impl Render for Workspace {
                                 })
                                 .children(self.zoomed.as_ref().and_then(|view| {
                                     let zoomed_view = view.upgrade()?;
+
+                                    let render_padding = |size| {
+                                        (size > 0.0).then(|| {
+                                            div()
+                                                .h_full()
+                                                .w(relative(size))
+                                                .bg(cx.theme().colors().editor_background)
+                                                .border_color(cx.theme().colors().pane_group_border)
+                                        })
+                                    };
+                                    let paddings = if centered_layout {
+                                        let settings = WorkspaceSettings::get_global(cx).centered_layout;
+                                        (
+                                            render_padding(Self::adjust_padding(settings.left_padding)),
+                                            render_padding(Self::adjust_padding(settings.right_padding)),
+                                        )
+                                    } else {
+                                        (None, None)
+                                    };
                                     let div = div()
                                         .occlude()
                                         .absolute()
                                         .overflow_hidden()
                                         .border_color(colors.border)
                                         .bg(colors.background)
-                                        .child(zoomed_view)
-                                        .inset_0()
+                                        .child(div()
+                                            .when_some(paddings.0, |this, p| this.child(p.border_r_1()))
+                                            .child(zoomed_view)
+                                            .when_some(paddings.1, |this, p| this.child(p.border_l_1()))
+                                        )
                                         .shadow_lg();
 
                                     Some(match self.zoomed_position {
@@ -6565,7 +6592,14 @@ impl Render for Workspace {
                                 }))
                                 .children(self.render_notifications(window, cx)),
                         )
-                        .child(self.status_bar.clone())
+                        .when(
+                            !self.zoomed.is_some(),
+                            |this| {
+                                this.child(
+                                    self.status_bar.clone()
+                                )
+                            },
+                        )
                         .child(self.modal_layer.clone())
                         .child(self.toast_layer.clone()),
                 ),

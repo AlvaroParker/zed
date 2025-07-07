@@ -3555,9 +3555,10 @@ impl Render for Pane {
                     cx.propagate();
                 }
             }))
-            .when(self.active_item().is_some() && display_tab_bar, |pane| {
-                pane.child((self.render_tab_bar.clone())(self, window, cx))
-            })
+            .when(
+                self.active_item().is_some() && display_tab_bar && !self.is_zoomed(),
+                |pane| pane.child((self.render_tab_bar.clone())(self, window, cx)),
+            )
             .child({
                 let has_worktrees = project.read(cx).visible_worktrees(cx).next().is_some();
                 // main content
