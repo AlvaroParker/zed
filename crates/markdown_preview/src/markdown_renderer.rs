@@ -7,9 +7,9 @@ use crate::markdown_elements::{
 use fs::normalize_path;
 use gpui::{
     AbsoluteLength, AnyElement, App, AppContext as _, ClipboardItem, Context, DefiniteLength, Div,
-    Element, ElementId, Entity, HighlightStyle, Hsla, ImageSource, InteractiveText, IntoElement,
-    Keystroke, Length, Modifiers, ParentElement, Render, Resource, SharedString, Styled,
-    StyledText, TextStyle, WeakEntity, Window, div, img, rems,
+    Element, ElementId, Empty, Entity, HighlightStyle, Hsla, ImageSource, InteractiveText,
+    IntoElement, Keystroke, Length, Modifiers, ParentElement, Render, Resource, SharedString,
+    Styled, StyledText, TextStyle, WeakEntity, Window, div, img, rems,
 };
 use settings::Settings;
 use std::{
@@ -39,6 +39,7 @@ pub struct RenderContext {
     text_color: Hsla,
     window_rem_size: Pixels,
     text_muted_color: Hsla,
+    text_link_color: Hsla,
     code_block_background_color: Hsla,
     code_span_background_color: Hsla,
     syntax_theme: Arc<SyntaxTheme>,
@@ -60,6 +61,11 @@ impl RenderContext {
         buffer_text_style.font_family = buffer_font_family.clone();
         buffer_text_style.font_size = AbsoluteLength::from(settings.buffer_font_size(cx));
 
+        let syntax_theme = theme.syntax().clone();
+
+        let text_color = theme.colors().text;
+        let text_link_color = syntax_theme.get("link_text").color.unwrap_or(text_color);
+
         RenderContext {
             workspace,
             next_id: 0,
@@ -69,7 +75,8 @@ impl RenderContext {
             text_style: window.text_style(),
             syntax_theme: theme.syntax().clone(),
             border_color: theme.colors().border,
-            text_color: theme.colors().text,
+            text_color,
+            text_link_color,
             window_rem_size: window.rem_size(),
             text_muted_color: theme.colors().text_muted,
             code_block_background_color: theme.colors().surface_background,
@@ -181,6 +188,16 @@ fn render_markdown_heading(parsed: &ParsedMarkdownHeading, cx: &mut RenderContex
         HeadingLevel::H6 => cx.text_muted_color,
         _ => cx.text_color,
     };
+
+    let line = if matches!(parsed.level, HeadingLevel::H1 | HeadingLevel::H2) {
+        div()
+            .py(cx.scaled_rems(0.5))
+            .child(div().w_full().h(cx.scaled_rems(0.125)).bg(cx.border_color))
+            .into_any()
+    } else {
+        Empty.into_any()
+    };
+
     div()
         .line_height(line_height)
         .text_size(text_size)
@@ -188,6 +205,7 @@ fn render_markdown_heading(parsed: &ParsedMarkdownHeading, cx: &mut RenderContex
         .pt(padding_top)
         .pb(padding_bottom)
         .children(render_markdown_text(&parsed.contents, cx))
+        .child(line)
         .whitespace_normal()
         .into_any()
 }
@@ -630,17 +648,21 @@ fn render_markdown_text(parsed_new: &MarkdownParagraph, cx: &mut RenderContext) 
                     }),
                     parsed.regions.iter().zip(&parsed.region_ranges).filter_map(
                         |(region, range)| {
+                            let mut region_range = None;
                             if region.code {
-                                Some((
-                                    range.clone(),
-                                    HighlightStyle {
-                                        background_color: Some(code_span_bg_color),
-                                        ..Default::default()
-                                    },
-                                ))
-                            } else {
-                                None
+                                region_range = Some(HighlightStyle {
+                                    background_color: Some(code_span_bg_color),
+                                    ..Default::default()
+                                });
                             }
+                            if region.link.is_some() {
+                                region_range =
+                                    Some(region_range.unwrap_or_default()).map(|mut h| {
+                                        h.color = Some(cx.text_link_color);
+                                        h
+                                    });
+                            }
+                            region_range.map(|style| (range.clone(), style))
                         },
                     ),
                 );
