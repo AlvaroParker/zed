@@ -263,6 +263,10 @@ impl strum::VariantNames for BaseKeymapContent {
 #[skip_serializing_none]
 #[derive(Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema, MergeFrom, Debug)]
 pub struct TitleBarSettingsContent {
+    /// Controls when the title bar is visible: "always" | "never" | "hide_in_full_screen".
+    ///
+    /// Default: "always"
+    pub show: Option<TitleBarVisibility>,
     /// Whether to show the branch icon beside branch switcher in the title bar.
     ///
     /// Default: false
@@ -860,6 +864,15 @@ pub struct ImageViewerSettingsContent {
     ///
     /// Default: "binary"
     pub unit: Option<ImageFileSizeUnit>,
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Debug, JsonSchema, MergeFrom, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TitleBarVisibility {
+    #[default]
+    Always,
+    Never,
+    HideInFullScreen,
 }
 
 #[skip_serializing_none]
