@@ -1068,7 +1068,7 @@ impl GitRepository for RealGitRepository {
                     stdout.parse()
                 } else {
                     let stderr = String::from_utf8_lossy(&output.stderr);
-                    anyhow::bail!("git status failed: {stderr}");
+                    anyhow::bail!("git stash list failed: {stderr}");
                 }
             })
             .boxed()
@@ -1363,8 +1363,11 @@ impl GitRepository for RealGitRepository {
 
                 anyhow::ensure!(
                     output.status.success(),
-                    "Failed to stash pop:\n{}",
-                    String::from_utf8_lossy(&output.stderr)
+                    GitBinaryCommandError {
+                        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+                        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+                        status: output.status
+                    }
                 );
                 Ok(())
             })
@@ -1392,8 +1395,11 @@ impl GitRepository for RealGitRepository {
 
                 anyhow::ensure!(
                     output.status.success(),
-                    "Failed to apply stash:\n{}",
-                    String::from_utf8_lossy(&output.stderr)
+                    GitBinaryCommandError {
+                        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+                        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+                        status: output.status
+                    }
                 );
                 Ok(())
             })
@@ -2018,7 +2024,7 @@ impl GitBinary {
 }
 
 #[derive(Error, Debug)]
-#[error("Git command failed:\n{stdout}{stderr}\n")]
+#[error("Git command failed:\n{stdout}\n{stderr}\n")]
 struct GitBinaryCommandError {
     stdout: String,
     stderr: String,
