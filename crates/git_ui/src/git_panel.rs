@@ -24,7 +24,7 @@ use git::stash::GitStash;
 use git::status::StageStatus;
 use git::{Amend, Signoff, ToggleStaged, repository::RepoPath, status::FileStatus};
 use git::{
-    ExpandCommitEditor, RestoreTrackedFiles, StageAll, StashAll, StashApply, StashPop,
+    ExpandCommitEditor, RestoreTrackedFiles, StageAll, Stash, StashAll, StashApply, StashPop,
     TrashUntrackedFiles, UnstageAll,
 };
 use gpui::{
@@ -112,6 +112,14 @@ enum TrashCancel {
     Cancel,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Copy, Deserialize, Serialize, Default)]
+pub enum CommitKind {
+    Amend,
+    #[default]
+    Normal,
+    Stash,
+}
+
 struct GitMenuState {
     has_tracked_changes: bool,
     has_staged_changes: bool,
@@ -196,7 +204,7 @@ pub enum Event {
 struct SerializedGitPanel {
     width: Option<Pixels>,
     #[serde(default)]
-    amend_pending: bool,
+    commit_kind: CommitKind,
     #[serde(default)]
     signoff_enabled: bool,
 }
@@ -287,7 +295,7 @@ pub struct GitPanel {
     entry_count: usize,
     new_staged_count: usize,
     pending_commit: Option<Task<()>>,
-    amend_pending: bool,
+    commit_kind: CommitKind,
     original_commit_message: Option<String>,
     signoff_enabled: bool,
     pending_serialization: Task<()>,
@@ -451,7 +459,7 @@ impl GitPanel {
                 new_count: 0,
                 new_staged_count: 0,
                 pending_commit: None,
-                amend_pending: false,
+                commit_kind: CommitKind::default(),
                 original_commit_message: None,
                 signoff_enabled: false,
                 pending_serialization: Task::ready(()),
@@ -559,7 +567,7 @@ impl GitPanel {
 
     fn serialize(&mut self, cx: &mut Context<Self>) {
         let width = self.width;
-        let amend_pending = self.amend_pending;
+        let commit_kind = self.commit_kind;
         let signoff_enabled = self.signoff_enabled;
 
         self.pending_serialization = cx.spawn(async move |git_panel, cx| {
@@ -586,7 +594,7 @@ impl GitPanel {
                             serialization_key,
                             serde_json::to_string(&SerializedGitPanel {
                                 width,
-                                amend_pending,
+                                commit_kind,
                                 signoff_enabled,
                             })?,
                         )
@@ -1364,7 +1372,7 @@ impl GitPanel {
         cx.spawn({
             async move |this, cx| {
                 let stash_task = active_repository
-                    .update(cx, |repo, cx| repo.stash_all(cx))?
+                    .update(cx, |repo, cx| repo.stash_all(None, cx))?
                     .await;
                 this.update(cx, |this, cx| {
                     stash_task
@@ -1436,25 +1444,39 @@ impl GitPanel {
     }
 
     fn commit(&mut self, _: &git::Commit, window: &mut Window, cx: &mut Context<Self>) {
-        if self.amend_pending {
-            return;
-        }
-        if self
-            .commit_editor
-            .focus_handle(cx)
-            .contains_focused(window, cx)
-        {
-            telemetry::event!("Git Committed", source = "Git Panel");
-            self.commit_changes(
-                CommitOptions {
-                    amend: false,
-                    signoff: self.signoff_enabled,
-                },
-                window,
-                cx,
-            )
-        } else {
-            cx.propagate();
+        match self.commit_kind {
+            CommitKind::Amend => return,
+            CommitKind::Normal => {
+                if self
+                    .commit_editor
+                    .focus_handle(cx)
+                    .contains_focused(window, cx)
+                {
+                    telemetry::event!("Git Committed", source = "Git Panel");
+                    self.commit_changes(
+                        CommitOptions {
+                            amend: false,
+                            signoff: self.signoff_enabled,
+                        },
+                        window,
+                        cx,
+                    )
+                } else {
+                    cx.propagate();
+                }
+            }
+            CommitKind::Stash => {
+                if self
+                    .commit_editor
+                    .focus_handle(cx)
+                    .contains_focused(window, cx)
+                {
+                    // telemetry::event!("Git Stash", source = "Git Panel");
+                    self.stash_changes(window, cx)
+                } else {
+                    cx.propagate();
+                }
+            }
         }
     }
 
@@ -1465,7 +1487,7 @@ impl GitPanel {
             .contains_focused(window, cx)
         {
             if self.head_commit(cx).is_some() {
-                if !self.amend_pending {
+                if !self.amend_pending() {
                     self.set_amend_pending(true, cx);
                     self.load_last_commit_message_if_empty(cx);
                 } else {
@@ -1647,6 +1669,43 @@ impl GitPanel {
         if options.amend {
             self.set_amend_pending(false, cx);
         }
+    }
+
+    pub(crate) fn stash_changes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(active_repository) = self.active_repository.clone() else {
+            return;
+        };
+
+        let error_spawn = |message, window: &mut Window, cx: &mut App| {
+            let prompt = window.prompt(PromptLevel::Warning, message, None, &["Ok"], cx);
+            cx.spawn(async move |_| {
+                prompt.await.ok();
+            })
+            .detach();
+        };
+
+        if !self.has_unstaged_changes() && !self.has_staged_changes() {
+            error_spawn("No changes to stash", window, cx);
+            return;
+        }
+
+        let stash_message = self.custom_or_suggested_commit_message(window, cx);
+
+        let task = active_repository.update(cx, |repo, cx| repo.stash_all(stash_message, cx));
+
+        let task = cx.spawn_in(window, async move |this, cx| {
+            let result = task.await;
+            this.update_in(cx, |this, window, cx| match result {
+                Ok(()) => {
+                    this.commit_editor
+                        .update(cx, |editor, cx| editor.clear(window, cx));
+                    this.original_commit_message = None;
+                }
+                Err(e) => this.show_error_toast("stash", e, cx),
+            })
+            .ok();
+        });
+        task.detach();
     }
 
     pub(crate) fn uncommit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -3131,6 +3190,7 @@ impl GitPanel {
                 let has_previous_commit = self.head_commit(cx).is_some();
                 let amend = self.amend_pending();
                 let signoff = self.signoff_enabled;
+                let stash = self.commit_kind == CommitKind::Stash;
 
                 move |window, cx| {
                     Some(ContextMenu::build(window, cx, |context_menu, _, _| {
@@ -3157,6 +3217,13 @@ impl GitPanel {
                                 )
                             })
                             .toggleable_entry(
+                                "Stash All",
+                                stash,
+                                IconPosition::Start,
+                                Some(Box::new(Stash)),
+                                move |window, cx| window.dispatch_action(Box::new(Stash), cx),
+                            )
+                            .toggleable_entry(
                                 "Signoff",
                                 signoff,
                                 IconPosition::Start,
@@ -3172,7 +3239,8 @@ impl GitPanel {
     pub fn configure_commit_button(&self, cx: &mut Context<Self>) -> (bool, &'static str) {
         if self.has_unstaged_conflicts() {
             (false, "You must resolve conflicts before committing")
-        } else if !self.has_staged_changes() && !self.has_tracked_changes() && !self.amend_pending {
+        } else if !self.has_staged_changes() && !self.has_tracked_changes() && !self.amend_pending()
+        {
             (false, "No changes to commit")
         } else if self.pending_commit.is_some() {
             (false, "Commit in progress")
@@ -3186,18 +3254,24 @@ impl GitPanel {
     }
 
     pub fn commit_button_title(&self) -> &'static str {
-        if self.amend_pending {
-            if self.has_staged_changes() {
-                "Amend"
-            } else if self.has_tracked_changes() {
-                "Amend Tracked"
-            } else {
-                "Amend"
+        match self.commit_kind {
+            CommitKind::Amend => {
+                if self.has_staged_changes() {
+                    "Amend"
+                } else if self.has_tracked_changes() {
+                    "Amend Tracked"
+                } else {
+                    "Amend"
+                }
             }
-        } else if self.has_staged_changes() {
-            "Commit"
-        } else {
-            "Commit Tracked"
+            CommitKind::Normal => {
+                if self.has_staged_changes() {
+                    "Commit"
+                } else {
+                    "Commit Tracked"
+                }
+            }
+            CommitKind::Stash => "Stash All",
         }
     }
 
@@ -3438,6 +3512,7 @@ impl GitPanel {
         let commit_tooltip_focus_handle = self.commit_editor.focus_handle(cx);
         let amend = self.amend_pending();
         let signoff = self.signoff_enabled;
+        let stash = self.commit_kind == CommitKind::Stash;
 
         let label_color = if self.pending_commit.is_some() {
             Color::Disabled
@@ -3468,22 +3543,37 @@ impl GitPanel {
                     let git_panel = cx.weak_entity();
                     move |_, window, cx| {
                         telemetry::event!("Git Committed", source = "Git Panel");
-                        git_panel
-                            .update(cx, |git_panel, cx| {
-                                git_panel.commit_changes(
-                                    CommitOptions { amend, signoff },
-                                    window,
-                                    cx,
-                                );
-                            })
-                            .ok();
+                        if stash {
+                            git_panel
+                                .update(cx, |git_panel, cx| {
+                                    git_panel.stash_changes(window, cx);
+                                })
+                                .ok();
+                        } else {
+                            git_panel
+                                .update(cx, |git_panel, cx| {
+                                    git_panel.commit_changes(
+                                        CommitOptions { amend, signoff },
+                                        window,
+                                        cx,
+                                    );
+                                })
+                                .ok();
+                        }
                     }
                 })
                 .disabled(!can_commit || self.modal_open)
                 .tooltip({
                     let handle = commit_tooltip_focus_handle.clone();
-                    move |_window, cx| {
-                        if can_commit {
+                    move |_, cx| {
+                        if stash {
+                            Tooltip::for_action_in(
+                                "git stash push -u",
+                                &git::Stash,
+                                &handle.clone(),
+                                cx,
+                            )
+                        } else if can_commit {
                             Tooltip::with_meta_in(
                                 tooltip,
                                 Some(if amend { &git::Amend } else { &git::Commit }),
@@ -4147,18 +4237,25 @@ impl GitPanel {
     }
 
     pub fn amend_pending(&self) -> bool {
-        self.amend_pending
+        self.commit_kind == CommitKind::Amend
     }
 
-    pub fn set_amend_pending(&mut self, value: bool, cx: &mut Context<Self>) {
-        if value && !self.amend_pending {
+    pub fn is_stash_commit(&self) -> bool {
+        self.commit_kind == CommitKind::Stash
+    }
+
+    pub fn set_commit_kind(&mut self, kind: CommitKind, cx: &mut Context<Self>) {
+        let was_amend = self.amend_pending();
+        let is_amend = kind == CommitKind::Amend;
+
+        if is_amend && !was_amend {
             let current_message = self.commit_message_buffer(cx).read(cx).text();
             self.original_commit_message = if current_message.trim().is_empty() {
                 None
             } else {
                 Some(current_message)
             };
-        } else if !value && self.amend_pending {
+        } else if !is_amend && was_amend {
             let message = self.original_commit_message.take().unwrap_or_default();
             self.commit_message_buffer(cx).update(cx, |buffer, cx| {
                 let start = buffer.anchor_before(0);
@@ -4167,9 +4264,29 @@ impl GitPanel {
             });
         }
 
-        self.amend_pending = value;
+        self.commit_kind = kind;
         self.serialize(cx);
         cx.notify();
+    }
+
+    pub fn set_stash_commit(&mut self, value: bool, cx: &mut Context<Self>) {
+        let kind = if value {
+            CommitKind::Stash
+        } else if self.commit_kind == CommitKind::Stash {
+            CommitKind::Normal
+        } else {
+            return;
+        };
+        self.set_commit_kind(kind, cx);
+    }
+
+    pub fn set_amend_pending(&mut self, value: bool, cx: &mut Context<Self>) {
+        let kind = if value {
+            CommitKind::Amend
+        } else {
+            CommitKind::Normal
+        };
+        self.set_commit_kind(kind, cx);
     }
 
     pub fn signoff_enabled(&self) -> bool {
@@ -4189,6 +4306,19 @@ impl GitPanel {
         cx: &mut Context<Self>,
     ) {
         self.set_signoff_enabled(!self.signoff_enabled, cx);
+    }
+
+    pub fn toggle_stash_enabled(
+        &mut self,
+        _: &Stash,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) {
+        if self.commit_kind == CommitKind::Stash {
+            self.commit_kind = CommitKind::Normal;
+        } else {
+            self.commit_kind = CommitKind::Stash;
+        }
     }
 
     pub async fn load(
@@ -4219,7 +4349,7 @@ impl GitPanel {
             if let Some(serialized_panel) = serialized_panel {
                 panel.update(cx, |panel, cx| {
                     panel.width = serialized_panel.width;
-                    panel.amend_pending = serialized_panel.amend_pending;
+                    panel.commit_kind = serialized_panel.commit_kind;
                     panel.signoff_enabled = serialized_panel.signoff_enabled;
                     cx.notify();
                 })
@@ -4265,8 +4395,8 @@ impl GitPanel {
     }
 
     pub(crate) fn toggle_amend_pending(&mut self, cx: &mut Context<Self>) {
-        self.set_amend_pending(!self.amend_pending, cx);
-        if self.amend_pending {
+        self.set_amend_pending(!self.amend_pending(), cx);
+        if self.amend_pending() {
             self.load_last_commit_message_if_empty(cx);
         }
     }
@@ -4301,6 +4431,7 @@ impl Render for GitPanel {
                     .on_action(cx.listener(GitPanel::commit))
                     .on_action(cx.listener(GitPanel::amend))
                     .on_action(cx.listener(GitPanel::toggle_signoff_enabled))
+                    .on_action(cx.listener(GitPanel::toggle_stash_enabled))
                     .on_action(cx.listener(Self::stage_all))
                     .on_action(cx.listener(Self::unstage_all))
                     .on_action(cx.listener(Self::stage_selected))
@@ -4342,10 +4473,10 @@ impl Render for GitPanel {
                         }
                     })
                     .children(self.render_footer(window, cx))
-                    .when(self.amend_pending, |this| {
+                    .when(self.amend_pending(), |this| {
                         this.child(self.render_pending_amend(cx))
                     })
-                    .when(!self.amend_pending, |this| {
+                    .when(!self.amend_pending(), |this| {
                         this.children(self.render_previous_commit(cx))
                     })
                     .into_any_element(),

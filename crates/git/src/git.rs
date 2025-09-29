@@ -58,6 +58,8 @@ actions!(
         StashPop,
         /// Apply the most recent stash.
         StashApply,
+        /// Pushes a new stash with a message.
+        StashPush,
         /// Restores all tracked files to their last committed state.
         RestoreTrackedFiles,
         /// Moves all untracked files to trash.
@@ -98,6 +100,8 @@ actions!(
         Clone,
         /// Adds a file to .gitignore.
         AddToGitignore,
+        /// Enables stash commit on the git panel.
+        Stash
     ]
 );
 

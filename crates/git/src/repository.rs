@@ -497,6 +497,7 @@ pub trait GitRepository: Send + Sync {
     fn stash_paths(
         &self,
         paths: Vec<RepoPath>,
+        message: Option<String>,
         env: Arc<HashMap<String, String>>,
     ) -> BoxFuture<'_, Result<()>>;
 
@@ -1509,6 +1510,7 @@ impl GitRepository for RealGitRepository {
     fn stash_paths(
         &self,
         paths: Vec<RepoPath>,
+        message: Option<String>,
         env: Arc<HashMap<String, String>>,
     ) -> BoxFuture<'_, Result<()>> {
         let working_directory = self.working_directory();
@@ -1522,6 +1524,10 @@ impl GitRepository for RealGitRepository {
                     .arg("--include-untracked");
 
                 cmd.args(paths.iter().map(|p| p.as_unix_str()));
+
+                if let Some(message) = message {
+                    cmd.arg("-m").arg(message);
+                }
 
                 let output = cmd.output().await?;
 
