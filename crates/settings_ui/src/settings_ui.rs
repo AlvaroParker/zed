@@ -378,7 +378,7 @@ pub fn open_settings_editor(cx: &mut App) -> anyhow::Result<WindowHandle<Setting
             }),
             focus: true,
             show: true,
-            kind: gpui::WindowKind::Normal,
+            kind: gpui::WindowKind::Floating,
             window_background: cx.theme().window_background_appearance(),
             window_min_size: Some(size(px(800.), px(600.))), // 4:3 Aspect Ratio
             ..Default::default()
