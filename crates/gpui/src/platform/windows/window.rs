@@ -428,6 +428,16 @@ impl WindowsWindow {
             disable_direct_composition,
             directx_devices,
         };
+        let parent = if params.kind == WindowKind::Floating {
+            let active_window = unsafe { GetActiveWindow() };
+            if !active_window.is_invalid() {
+                Some(active_window)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
         let creation_result = unsafe {
             CreateWindowExW(
                 dwexstyle,
@@ -438,7 +448,7 @@ impl WindowsWindow {
                 CW_USEDEFAULT,
                 CW_USEDEFAULT,
                 CW_USEDEFAULT,
-                None,
+                parent,
                 None,
                 Some(hinstance.into()),
                 Some(&context as *const _ as *const _),
