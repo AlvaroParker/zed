@@ -3195,10 +3195,21 @@ impl GitPanel {
                 move |window, cx| {
                     Some(ContextMenu::build(window, cx, |context_menu, _, _| {
                         context_menu
+                            .toggleable_entry(
+                                if stash {
+                                    "Switch to Commit"
+                                } else {
+                                    "Switch to Stash"
+                                },
+                                false,
+                                IconPosition::Start,
+                                Some(Box::new(Stash)),
+                                move |window, cx| window.dispatch_action(Box::new(Stash), cx),
+                            )
                             .when_some(keybinding_target.clone(), |el, keybinding_target| {
                                 el.context(keybinding_target)
                             })
-                            .when(has_previous_commit, |this| {
+                            .when(has_previous_commit && !stash, |this| {
                                 this.toggleable_entry(
                                     "Amend",
                                     amend,
@@ -3216,20 +3227,15 @@ impl GitPanel {
                                     },
                                 )
                             })
-                            .toggleable_entry(
-                                "Stash All",
-                                stash,
-                                IconPosition::Start,
-                                Some(Box::new(Stash)),
-                                move |window, cx| window.dispatch_action(Box::new(Stash), cx),
-                            )
-                            .toggleable_entry(
-                                "Signoff",
-                                signoff,
-                                IconPosition::Start,
-                                Some(Box::new(Signoff)),
-                                move |window, cx| window.dispatch_action(Box::new(Signoff), cx),
-                            )
+                            .when(!stash, |this| {
+                                this.toggleable_entry(
+                                    "Signoff",
+                                    signoff,
+                                    IconPosition::Start,
+                                    Some(Box::new(Signoff)),
+                                    move |window, cx| window.dispatch_action(Box::new(Signoff), cx),
+                                )
+                            })
                     }))
                 }
             })
