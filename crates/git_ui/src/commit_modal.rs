@@ -1,7 +1,7 @@
 use crate::branch_picker::{self, BranchList};
 use crate::git_panel::{CommitKind, GitPanel, commit_message_editor};
 use git::repository::CommitOptions;
-use git::{Amend, Commit, GenerateCommitMessage, Signoff, Stash, StashPush};
+use git::{Amend, Commit, GenerateCommitMessage, Signoff, StashPush, ToggleCommitMode};
 use panel::{panel_button, panel_editor_style};
 use project::DisableAiSettings;
 use settings::Settings;
@@ -285,10 +285,32 @@ impl CommitModal {
 
                     Some(ContextMenu::build(window, cx, |context_menu, _, _| {
                         context_menu
+                            .toggleable_entry(
+                                if stash {
+                                    "Switch to Commit"
+                                } else {
+                                    "Switch to Stash"
+                                },
+                                false,
+                                IconPosition::Start,
+                                Some(Box::new(ToggleCommitMode)),
+                                {
+                                    let git_panel = git_panel_entity.clone();
+                                    move |window, cx| {
+                                        git_panel.update(cx, |git_panel, cx| {
+                                            git_panel.toggle_commit_mode(
+                                                &ToggleCommitMode,
+                                                window,
+                                                cx,
+                                            );
+                                        })
+                                    }
+                                },
+                            )
                             .when_some(keybinding_target.clone(), |el, keybinding_target| {
                                 el.context(keybinding_target)
                             })
-                            .when(has_previous_commit, |this| {
+                            .when(has_previous_commit && !stash, |this| {
                                 this.toggleable_entry(
                                     "Amend",
                                     amend_enabled,
@@ -306,34 +328,15 @@ impl CommitModal {
                                     },
                                 )
                             })
-                            .toggleable_entry(
-                                "Stash All",
-                                stash,
-                                IconPosition::Start,
-                                Some(Box::new(Stash)),
-                                {
-                                    let git_panel = git_panel_entity.clone();
-                                    move |window, cx| {
-                                        git_panel.update(cx, |git_panel, cx| {
-                                            git_panel.toggle_stash_enabled(&Stash, window, cx);
-                                        })
-                                    }
-                                },
-                            )
-                            .toggleable_entry(
-                                "Signoff",
-                                signoff_enabled,
-                                IconPosition::Start,
-                                Some(Box::new(Signoff)),
-                                {
-                                    let git_panel = git_panel_entity.clone();
-                                    move |window, cx| {
-                                        git_panel.update(cx, |git_panel, cx| {
-                                            git_panel.toggle_signoff_enabled(&Signoff, window, cx);
-                                        })
-                                    }
-                                },
-                            )
+                            .when(!stash, |this| {
+                                this.toggleable_entry(
+                                    "Signoff",
+                                    signoff_enabled,
+                                    IconPosition::Start,
+                                    Some(Box::new(Signoff)),
+                                    move |window, cx| window.dispatch_action(Box::new(Signoff), cx),
+                                )
+                            })
                     }))
                 }
             })

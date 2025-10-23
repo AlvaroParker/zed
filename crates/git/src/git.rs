@@ -100,8 +100,8 @@ actions!(
         Clone,
         /// Adds a file to .gitignore.
         AddToGitignore,
-        /// Enables stash commit on the git panel.
-        Stash
+        /// Toggle commit mode between regular and stash.
+        ToggleCommitMode
     ]
 );
 

@@ -24,8 +24,8 @@ use git::stash::GitStash;
 use git::status::StageStatus;
 use git::{Amend, Signoff, ToggleStaged, repository::RepoPath, status::FileStatus};
 use git::{
-    ExpandCommitEditor, RestoreTrackedFiles, StageAll, Stash, StashAll, StashApply, StashPop,
-    TrashUntrackedFiles, UnstageAll,
+    ExpandCommitEditor, RestoreTrackedFiles, StageAll, StashAll, StashApply, StashPop,
+    ToggleCommitMode, TrashUntrackedFiles, UnstageAll,
 };
 use gpui::{
     Action, AsyncApp, AsyncWindowContext, ClickEvent, Corner, DismissEvent, Entity, EventEmitter,
@@ -120,6 +120,86 @@ pub enum CommitKind {
     Stash,
 }
 
+/// Manages the commit mode state for the Git panel.
+///
+/// The panel supports three commit modes:
+/// - Normal: Standard git commit
+/// - Amend: Amend the previous commit
+/// - Stash: Create a stash instead of a commit
+///
+/// ## State Preservation
+///
+/// The `saved_state` field preserves the previous mode when transitioning between
+/// modes, enabling state restoration. For example:
+/// - Normal -> Amend -> Stash -> (restore) -> Amend -> (restore) -> Normal
+///
+/// This is useful for toggling modes (Stash commit mode and Normal/Amend mode)
+/// while remembering the last non-Stash mode.
+///
+/// ## Message Handling
+///
+/// The `original_commit_message` field stores the commit message that was present
+/// before entering Amend mode. This allows restoring the user's message when
+/// toggling Amend off. It's skipped during serialization since it's transient state.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Default)]
+pub struct CommitState {
+    current: CommitKind,
+    saved_state: CommitKind,
+    #[serde(skip)]
+    original_commit_message: Option<String>,
+}
+
+impl CommitState {
+    fn current(&self) -> CommitKind {
+        self.current
+    }
+
+    fn is_amend(&self) -> bool {
+        self.current == CommitKind::Amend
+    }
+
+    fn is_stash(&self) -> bool {
+        self.current == CommitKind::Stash
+    }
+
+    fn saved_state(&self) -> CommitKind {
+        self.saved_state
+    }
+
+    #[cfg(test)]
+    pub(crate) fn original_commit_message(&self) -> Option<&String> {
+        self.original_commit_message.as_ref()
+    }
+
+    fn set_original_commit_message(&mut self, message: Option<String>) {
+        self.original_commit_message = message;
+    }
+
+    fn take_original_commit_message(&mut self) -> Option<String> {
+        self.original_commit_message.take()
+    }
+
+    fn transition_to(&mut self, new_kind: CommitKind) {
+        if self.current == new_kind {
+            return;
+        }
+
+        // If we're transitioning back to the saved state, restore properly
+        if new_kind == self.saved_state {
+            self.current = new_kind;
+            self.saved_state = CommitKind::Normal;
+            return;
+        }
+
+        // Otherwise, save the current state before transitioning
+        if new_kind != CommitKind::Normal {
+            self.saved_state = self.current;
+        }
+
+        self.current = new_kind;
+    }
+}
+
 struct GitMenuState {
     has_tracked_changes: bool,
     has_staged_changes: bool,
@@ -204,7 +284,7 @@ pub enum Event {
 struct SerializedGitPanel {
     width: Option<Pixels>,
     #[serde(default)]
-    commit_kind: CommitKind,
+    commit_state: CommitState,
     #[serde(default)]
     signoff_enabled: bool,
 }
@@ -295,8 +375,7 @@ pub struct GitPanel {
     entry_count: usize,
     new_staged_count: usize,
     pending_commit: Option<Task<()>>,
-    commit_kind: CommitKind,
-    original_commit_message: Option<String>,
+    commit_state: CommitState,
     signoff_enabled: bool,
     pending_serialization: Task<()>,
     pub(crate) project: Entity<Project>,
@@ -459,8 +538,7 @@ impl GitPanel {
                 new_count: 0,
                 new_staged_count: 0,
                 pending_commit: None,
-                commit_kind: CommitKind::default(),
-                original_commit_message: None,
+                commit_state: CommitState::default(),
                 signoff_enabled: false,
                 pending_serialization: Task::ready(()),
                 single_staged_entry: None,
@@ -567,7 +645,7 @@ impl GitPanel {
 
     fn serialize(&mut self, cx: &mut Context<Self>) {
         let width = self.width;
-        let commit_kind = self.commit_kind;
+        let commit_state = self.commit_state.clone();
         let signoff_enabled = self.signoff_enabled;
 
         self.pending_serialization = cx.spawn(async move |git_panel, cx| {
@@ -594,7 +672,7 @@ impl GitPanel {
                             serialization_key,
                             serde_json::to_string(&SerializedGitPanel {
                                 width,
-                                commit_kind,
+                                commit_state,
                                 signoff_enabled,
                             })?,
                         )
@@ -1444,7 +1522,7 @@ impl GitPanel {
     }
 
     fn commit(&mut self, _: &git::Commit, window: &mut Window, cx: &mut Context<Self>) {
-        match self.commit_kind {
+        match self.commit_state.current() {
             CommitKind::Amend => return,
             CommitKind::Normal => {
                 if self
@@ -1657,7 +1735,7 @@ impl GitPanel {
                     Ok(()) => {
                         this.commit_editor
                             .update(cx, |editor, cx| editor.clear(window, cx));
-                        this.original_commit_message = None;
+                        this.commit_state.set_original_commit_message(None);
                     }
                     Err(e) => this.show_error_toast("commit", e, cx),
                 }
@@ -1699,7 +1777,7 @@ impl GitPanel {
                 Ok(()) => {
                     this.commit_editor
                         .update(cx, |editor, cx| editor.clear(window, cx));
-                    this.original_commit_message = None;
+                    this.commit_state.set_original_commit_message(None);
                 }
                 Err(e) => this.show_error_toast("stash", e, cx),
             })
@@ -3190,7 +3268,7 @@ impl GitPanel {
                 let has_previous_commit = self.head_commit(cx).is_some();
                 let amend = self.amend_pending();
                 let signoff = self.signoff_enabled;
-                let stash = self.commit_kind == CommitKind::Stash;
+                let stash = self.commit_state.is_stash();
 
                 move |window, cx| {
                     Some(ContextMenu::build(window, cx, |context_menu, _, _| {
@@ -3203,8 +3281,10 @@ impl GitPanel {
                                 },
                                 false,
                                 IconPosition::Start,
-                                Some(Box::new(Stash)),
-                                move |window, cx| window.dispatch_action(Box::new(Stash), cx),
+                                Some(Box::new(ToggleCommitMode)),
+                                move |window, cx| {
+                                    window.dispatch_action(Box::new(ToggleCommitMode), cx)
+                                },
                             )
                             .when_some(keybinding_target.clone(), |el, keybinding_target| {
                                 el.context(keybinding_target)
@@ -3260,7 +3340,7 @@ impl GitPanel {
     }
 
     pub fn commit_button_title(&self) -> &'static str {
-        match self.commit_kind {
+        match self.commit_state.current() {
             CommitKind::Amend => {
                 if self.has_staged_changes() {
                     "Amend"
@@ -3518,7 +3598,7 @@ impl GitPanel {
         let commit_tooltip_focus_handle = self.commit_editor.focus_handle(cx);
         let amend = self.amend_pending();
         let signoff = self.signoff_enabled;
-        let stash = self.commit_kind == CommitKind::Stash;
+        let stash = self.commit_state.is_stash();
 
         let label_color = if self.pending_commit.is_some() {
             Color::Disabled
@@ -3575,7 +3655,7 @@ impl GitPanel {
                         if stash {
                             Tooltip::for_action_in(
                                 "git stash push -u",
-                                &git::Stash,
+                                &git::ToggleCommitMode,
                                 &handle.clone(),
                                 cx,
                             )
@@ -3638,6 +3718,8 @@ impl GitPanel {
         let workspace = self.workspace.clone();
         let this = cx.entity();
 
+        let can_reset = commit.has_parent && !self.commit_state.is_stash();
+
         Some(
             h_flex()
                 .py_1p5()
@@ -3685,7 +3767,7 @@ impl GitPanel {
                             }
                         }),
                 )
-                .when(commit.has_parent, |this| {
+                .when(can_reset, |this| {
                     let has_unstaged = self.has_unstaged_changes();
                     this.child(
                         panel_icon_button("undo", IconName::Undo)
@@ -4243,26 +4325,31 @@ impl GitPanel {
     }
 
     pub fn amend_pending(&self) -> bool {
-        self.commit_kind == CommitKind::Amend
+        self.commit_state.is_amend()
     }
 
     pub fn is_stash_commit(&self) -> bool {
-        self.commit_kind == CommitKind::Stash
+        self.commit_state.is_stash()
     }
 
     pub fn set_commit_kind(&mut self, kind: CommitKind, cx: &mut Context<Self>) {
-        let was_amend = self.amend_pending();
+        let was_amend = self.commit_state.is_amend();
         let is_amend = kind == CommitKind::Amend;
 
         if is_amend && !was_amend {
             let current_message = self.commit_message_buffer(cx).read(cx).text();
-            self.original_commit_message = if current_message.trim().is_empty() {
+            let saved_message = if current_message.trim().is_empty() {
                 None
             } else {
                 Some(current_message)
             };
+            self.commit_state.set_original_commit_message(saved_message);
+            self.load_last_commit_message_if_empty(cx);
         } else if !is_amend && was_amend {
-            let message = self.original_commit_message.take().unwrap_or_default();
+            let message = self
+                .commit_state
+                .take_original_commit_message()
+                .unwrap_or_default();
             self.commit_message_buffer(cx).update(cx, |buffer, cx| {
                 let start = buffer.anchor_before(0);
                 let end = buffer.anchor_after(buffer.len());
@@ -4270,29 +4357,27 @@ impl GitPanel {
             });
         }
 
-        self.commit_kind = kind;
+        self.commit_state.transition_to(kind);
         self.serialize(cx);
         cx.notify();
     }
 
     pub fn set_stash_commit(&mut self, value: bool, cx: &mut Context<Self>) {
-        let kind = if value {
-            CommitKind::Stash
-        } else if self.commit_kind == CommitKind::Stash {
-            CommitKind::Normal
-        } else {
-            return;
-        };
-        self.set_commit_kind(kind, cx);
+        if value {
+            self.set_commit_kind(CommitKind::Stash, cx);
+        } else if self.commit_state.is_stash() {
+            let target = self.commit_state.saved_state();
+            self.set_commit_kind(target, cx);
+        }
     }
 
     pub fn set_amend_pending(&mut self, value: bool, cx: &mut Context<Self>) {
-        let kind = if value {
-            CommitKind::Amend
-        } else {
-            CommitKind::Normal
-        };
-        self.set_commit_kind(kind, cx);
+        if value {
+            self.set_commit_kind(CommitKind::Amend, cx);
+        } else if self.commit_state.is_amend() {
+            let target = self.commit_state.saved_state();
+            self.set_commit_kind(target, cx);
+        }
     }
 
     pub fn signoff_enabled(&self) -> bool {
@@ -4314,17 +4399,13 @@ impl GitPanel {
         self.set_signoff_enabled(!self.signoff_enabled, cx);
     }
 
-    pub fn toggle_stash_enabled(
+    pub fn toggle_commit_mode(
         &mut self,
-        _: &Stash,
+        _: &ToggleCommitMode,
         _window: &mut Window,
-        _cx: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) {
-        if self.commit_kind == CommitKind::Stash {
-            self.commit_kind = CommitKind::Normal;
-        } else {
-            self.commit_kind = CommitKind::Stash;
-        }
+        self.set_stash_commit(!self.is_stash_commit(), cx);
     }
 
     pub async fn load(
@@ -4355,7 +4436,11 @@ impl GitPanel {
             if let Some(serialized_panel) = serialized_panel {
                 panel.update(cx, |panel, cx| {
                     panel.width = serialized_panel.width;
-                    panel.commit_kind = serialized_panel.commit_kind;
+                    let is_amend = serialized_panel.commit_state.is_amend();
+                    panel.commit_state = serialized_panel.commit_state;
+                    if is_amend {
+                        panel.load_last_commit_message_if_empty(cx);
+                    }
                     panel.signoff_enabled = serialized_panel.signoff_enabled;
                     cx.notify();
                 })
@@ -4437,7 +4522,7 @@ impl Render for GitPanel {
                     .on_action(cx.listener(GitPanel::commit))
                     .on_action(cx.listener(GitPanel::amend))
                     .on_action(cx.listener(GitPanel::toggle_signoff_enabled))
-                    .on_action(cx.listener(GitPanel::toggle_stash_enabled))
+                    .on_action(cx.listener(GitPanel::toggle_commit_mode))
                     .on_action(cx.listener(Self::stage_all))
                     .on_action(cx.listener(Self::unstage_all))
                     .on_action(cx.listener(Self::stage_selected))
@@ -5687,12 +5772,12 @@ mod tests {
             });
 
             panel.set_amend_pending(true, cx);
-            assert!(panel.original_commit_message.is_some());
+            assert!(panel.commit_state.original_commit_message().is_some());
 
             panel.set_amend_pending(false, cx);
             let current_message = panel.commit_message_buffer(cx).read(cx).text();
             assert_eq!(current_message, "Initial commit message");
-            assert!(panel.original_commit_message.is_none());
+            assert!(panel.commit_state.original_commit_message().is_none());
         });
 
         // Test: User has empty commit message, enables amend, then disables (clears message)
@@ -5704,7 +5789,7 @@ mod tests {
             });
 
             panel.set_amend_pending(true, cx);
-            assert!(panel.original_commit_message.is_none());
+            assert!(panel.commit_state.original_commit_message().is_none());
 
             panel.commit_message_buffer(cx).update(cx, |buffer, cx| {
                 let start = buffer.anchor_before(0);
