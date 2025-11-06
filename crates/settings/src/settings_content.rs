@@ -265,7 +265,10 @@ impl strum::VariantNames for BaseKeymapContent {
 pub struct TitleBarSettingsContent {
     /// Controls when the title bar is visible: "always" | "never" | "hide_in_full_screen".
     ///
+    /// This setting only has effect on Linux.
+    ///
     /// Default: "always"
+    #[serde(rename = "experimental.show")]
     pub show: Option<TitleBarVisibility>,
     /// Whether to show the branch icon beside branch switcher in the title bar.
     ///

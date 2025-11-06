@@ -1,4 +1,5 @@
-use settings::{Settings, SettingsContent, TitleBarVisibility};
+use settings::TitleBarVisibility;
+use settings::{Settings, SettingsContent};
 
 #[derive(Copy, Clone, Debug)]
 pub struct TitleBarSettings {
