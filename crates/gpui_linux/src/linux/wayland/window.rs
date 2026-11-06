@@ -32,7 +32,10 @@ use wayland_protocols::{
 use wayland_protocols_plasma::blur::client::org_kde_kwin_blur;
 use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1;
 
-use crate::linux::wayland::{display::WaylandDisplay, serial::SerialKind};
+use crate::linux::wayland::{
+    display::WaylandDisplay,
+    serial::{ActivationContext, SerialKind},
+};
 use crate::linux::{Globals, Output, PendingActivation, WaylandClientStatePtr, get_window};
 use gpui::{
     AnyWindowHandle, Bounds, Capslock, Corners, Decorations, DevicePixels, ExternalDragPayload,
@@ -894,6 +897,29 @@ impl WaylandWindow {
         surface.commit();
 
         Ok((this, surface.id()))
+    }
+
+    fn request_activation(&self, input_context: Option<ActivationContext>) {
+        let state = self.borrow();
+        let (Some(activation), Some(app_id)) = (&state.globals.activation, state.app_id.clone())
+        else {
+            return;
+        };
+        let token = activation.get_activation_token(
+            &state.globals.qh,
+            PendingActivation::Window(state.surface.id()),
+        );
+        token.set_app_id(app_id);
+        // Without a recent press the compositor won't grant focus, but still request a
+        // token: KWin and Mutter mark the window as demanding attention and end their
+        // launch feedback once the token is passed to `activate`.
+        if let Some(context) = input_context {
+            token.set_serial(context.serial.as_raw(), &state.globals.seat);
+            token.set_surface(&context.requesting_surface);
+        } else {
+            token.set_surface(&state.surface);
+        }
+        token.commit();
     }
 }
 
@@ -1865,28 +1891,19 @@ impl PlatformWindow for WaylandWindow {
     }
 
     fn activate(&self) {
-        let state = self.borrow();
-        if let (Some(activation), Some(app_id)) = (&state.globals.activation, state.app_id.clone())
-        {
-            let token = activation.get_activation_token(
-                &state.globals.qh,
-                PendingActivation::Window(state.surface.id()),
-            );
-            token.set_app_id(app_id);
-            // Without a recent press the compositor won't grant focus, but still request a
-            // token: KWin and Mutter mark the window as demanding attention and end their
-            // launch feedback once the token is passed to `activate`.
-            if let Some(context) = state.client.activation_context() {
-                token.set_serial(context.serial.as_raw(), &state.globals.seat);
-                token.set_surface(&context.requesting_surface);
-            } else {
-                token.set_surface(&state.surface);
-            }
-            token.commit();
-        }
+        let input_context = self.borrow().client.activation_context();
+        self.request_activation(input_context);
     }
 
-    fn request_attention(&self) {}
+    fn request_attention(&self) {
+        if self.is_active() {
+            return;
+        }
+
+        // Omit the serial to request urgency: a serial can grant focus, or cause wlroots
+        // and COSMIC to reject the token when the window isn't focused.
+        self.request_activation(None);
+    }
 
     fn is_active(&self) -> bool {
         self.borrow().active
